@@ -1,0 +1,5 @@
+-- AlterEnum
+ALTER TYPE "ChargeGroup" ADD VALUE 'CLEARANCE';
+
+-- AlterEnum
+ALTER TYPE "PricingTemplateCode" ADD VALUE 'AIR_IMPORT_LOCAL_CLEARANCE';

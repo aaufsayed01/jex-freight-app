@@ -1,0 +1,719 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  CORPORATE_CLIENT
+  AGENT
+  INTERNAL_STAFF
+  ADMIN
+}
+
+enum CompanyType {
+  CORPORATE_CLIENT
+  AGENT
+  INTERNAL
+}
+
+enum CompanyRole {
+  MEMBER
+  ADMIN
+}
+
+enum ShipmentMode {
+  AIR
+  SEA
+  ROAD
+  OTHER
+}
+
+enum ShipmentStatus {
+  QUOTED
+  BOOKED
+  CONFIRMED
+  AWAITING_DOCUMENTS
+  READY_FOR_PICKUP
+  PICKED_UP
+  RECEIVED_AT_WAREHOUSE
+  CUSTOMS_CLEARANCE
+  LOADED
+  DEPARTED
+  IN_TRANSIT
+  ARRIVED
+  OUT_FOR_DELIVERY
+  EXCEPTION
+  ON_HOLD
+  DELIVERED
+  CANCELLED
+}
+
+enum QuoteStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum BookingStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+enum DocumentType {
+  COMMERCIAL_INVOICE
+  PACKING_LIST
+  BOL
+  AWB
+  CUSTOMS_DECLARATION
+  CERTIFICATE_OF_ORIGIN
+  INSURANCE
+  PROOF_OF_DELIVERY
+  OTHER
+}
+
+/**
+ * ✅ Keep this enum for actual notifications stored in Notification table
+ */
+enum NotificationType {
+  QUOTE_RESPONSE
+  BOOKING_CONFIRMATION
+  MILESTONE_UPDATE
+  DOCUMENT_REQUEST
+  URGENT_ALERT
+  SHIPMENT_STATUS
+  TRACKING_EVENT
+  DOCUMENT_UPLOADED
+  DOCUMENT_VISIBILITY
+}
+
+enum Currency {
+  USD
+  AED
+  EUR
+  GBP
+  INR
+  SAR
+  QAR
+  OMR
+  KWD
+}
+
+enum Language {
+  EN
+  AR
+}
+
+/**
+ * ✅ New enum ONLY for user preference categories
+ */
+enum NotificationPreferenceType {
+  QUOTE_UPDATES
+  BOOKING_UPDATES
+  SHIPMENT_MILESTONES
+  DOCUMENT_REQUESTS
+  URGENT_ALERTS
+}
+
+enum BreakdownRequestStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/**
+ * -----------------------------
+ * CORE MODELS
+ * -----------------------------
+ */
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  role         UserRole
+  phone        String?
+  jobTitle     String?
+
+  isActive               Boolean                 @default(true)
+  isEmailVerified        Boolean                 @default(false)
+  emailVerifiedAt        DateTime?
+  emailVerificationToken EmailVerificationToken?
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  // ✅ Preferences (Phase 1 - MVP)
+  preferredCurrency Currency @default(AED)
+  preferredLanguage Language @default(EN)
+
+  // ✅ Company-level permissions
+  companyRole CompanyRole @default(MEMBER)
+
+  // ✅ Notification preferences (Phase 1 - MVP)
+  notificationSettings NotificationSetting[]
+
+  quotesPriced              QuoteRequest[] @relation("QuotePricedBy")
+  quotesPricingLocked       QuoteRequest[] @relation("QuotePricingLockedBy")
+  exworksBreakdownsReviewed QuoteRequest[] @relation("ExworksBreakdownReviewedBy")
+
+  createdPricingSnapshots QuotePricingSnapshot[] @relation("QuotePricingSnapshotCreatedBy")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quotesRequested           QuoteRequest[]    @relation("QuoteRequestedBy")
+  bookingsCreated           Booking[]         @relation("BookingCreatedBy")
+  shipmentsOwned            Shipment[]        @relation("ShipmentOwner")
+  notifications             Notification[]
+  documentsUploaded         Document[]        @relation("DocumentsUploadedBy")
+  auditLogs                 AuditLog[]
+  documentRequestsRequested DocumentRequest[] @relation("DocumentRequestsRequestedBy")
+}
+
+model Company {
+  id   String      @id @default(cuid())
+  name String
+  type CompanyType
+
+  country        String?
+  city           String?
+  state          String?
+  addressLine1   String?
+  addressLine2   String?
+  postalCode     String?
+  vatNumber      String?
+  billingAddress String?
+  contactEmail   String?
+  contactPhone   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users            User[]
+  quotes           QuoteRequest[]
+  bookings         Booking[]
+  shipments        Shipment[]
+  documents        Document[]
+  notification     Notification[]
+  auditLogs        AuditLog[]
+  documentRequests DocumentRequest[]
+}
+
+model QuoteRequest {
+  id        String      @id @default(cuid())
+  reference String      @unique
+  status    QuoteStatus @default(PENDING)
+
+  requestedById String
+  requestedBy   User   @relation("QuoteRequestedBy", fields: [requestedById], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  origin             String
+  destination        String
+  commodity          String?
+  weightKg           Float?
+  volumeCbm          Float?
+  pieces             Int?
+  chargeableWeightKg Float?
+  packagesJson       Json?
+  exworksBreakdownHiddenCodes Json?
+  shipmentMode       ShipmentMode
+
+  isHazmat                Boolean @default(false)
+  isFragile               Boolean @default(false)
+  isTemperatureControlled Boolean @default(false)
+
+  preferredTransitTime String?
+  serviceLevel         String?
+
+  totalPrice Float?
+  currency   String?
+  validUntil DateTime?
+
+  pricedAt   DateTime?
+  pricedById String?
+  pricedBy   User?     @relation("QuotePricedBy", fields: [pricedById], references: [id])
+
+  // ✅ You already use this: store opsLines, totals, customer view, weightSummary
+  pricingSnapshot Json?
+  pricingVersion  Int   @default(0)
+
+  pricingLockedAt   DateTime?
+  pricingLockedById String?
+  pricingLockedBy   User?     @relation("QuotePricingLockedBy", fields: [pricingLockedById], references: [id])
+  pricingLockReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pricingSnapshots QuotePricingSnapshot[]
+
+  booking   Booking?
+  documents Document[]
+
+  // Customer breakup controls
+  showExworksBreakdown Boolean @default(false)
+
+  exworksBreakdownStatus       BreakdownRequestStatus @default(NONE)
+  exworksBreakdownRequestedAt  DateTime?
+  exworksBreakdownReviewedAt   DateTime?
+  exworksBreakdownReviewedById String?
+  exworksBreakdownReviewNote   String?
+
+  exworksBreakdownReviewedBy User? @relation("ExworksBreakdownReviewedBy", fields: [exworksBreakdownReviewedById], references: [id])
+
+  // ✅ NEW pricing system (1:1)
+  pricing QuotePricing?
+
+  @@index([exworksBreakdownStatus])
+}
+
+model Booking {
+  id         String        @id @default(cuid())
+  bookingRef String        @unique
+  status     BookingStatus @default(CONFIRMED)
+
+  quoteId String?       @unique
+  quote   QuoteRequest? @relation(fields: [quoteId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdById String
+  createdBy   User   @relation("BookingCreatedBy", fields: [createdById], references: [id])
+
+  incoterms     String?
+  shipperName   String?
+  consigneeName String?
+  notifyParty   String?
+
+  shipment Shipment?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Shipment {
+  id          String         @id @default(cuid())
+  shipmentRef String         @unique
+  mode        ShipmentMode
+  status      ShipmentStatus @default(BOOKED)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  ownerId String
+  owner   User   @relation("ShipmentOwner", fields: [ownerId], references: [id])
+
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+
+  origin      String
+  destination String
+
+  eta DateTime?
+  etd DateTime?
+  ata DateTime?
+  atd DateTime?
+
+  containerNumber String?
+  awbNumber       String?
+  bolNumber       String?
+
+  currentLocation String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trackingEvents   TrackingEvent[]
+  documents        Document[]
+  documentRequests DocumentRequest[]
+}
+
+model TrackingEvent {
+  id         String   @id @default(cuid())
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+
+  status      ShipmentStatus
+  description String?
+  location    String?
+
+  eventTime DateTime @default(now())
+  createdAt DateTime @default(now())
+}
+
+enum DocumentStorage {
+  S3
+  LOCAL
+}
+
+model Document {
+  id String @id @default(cuid())
+
+  shipmentId String?
+  shipment   Shipment? @relation(fields: [shipmentId], references: [id])
+
+  quoteRequestId String?
+  quoteRequest   QuoteRequest? @relation(fields: [quoteRequestId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  uploadedById String?
+  uploadedBy   User?   @relation("DocumentsUploadedBy", fields: [uploadedById], references: [id])
+
+  fulfilledRequests DocumentRequest[] @relation("DocumentRequestFulfilledByDocument")
+
+  type DocumentType
+  customType String?
+
+  filename     String
+  originalName String
+  path         String?
+
+  storage DocumentStorage @default(LOCAL)
+
+  s3Bucket String?
+  s3Region String?
+  s3Key    String? @unique
+
+  mimeType String?
+  size     Int
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+
+  visibleToClient Boolean   @default(true)
+  deletedAt       DateTime?
+
+  @@index([companyId, shipmentId])
+  @@index([shipmentId])
+  @@index([companyId, quoteRequestId])
+  @@index([quoteRequestId])
+}
+
+model Notification {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type    NotificationType
+  title   String
+  message String
+
+  entityType String?
+  entityId   String?
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([userId, readAt])
+  @@index([entityType, entityId])
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+enum AuditEntity {
+  QUOTE_REQUEST
+  QUOTE
+  BOOKING
+  SHIPMENT
+  DOCUMENT
+  USER
+  COMPANY
+  AUTH
+  NOTIFICATION
+  OTHER
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  UPLOAD
+  DOWNLOAD
+  LOGIN
+  LOGOUT
+  DECISION
+  OTHER
+}
+
+model AuditLog {
+  id       String      @id @default(cuid())
+  action   AuditAction
+  entity   AuditEntity
+  entityId String?
+  message  String?
+
+  userId    String?
+  companyId String?
+
+  ip        String?
+  userAgent String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@index([userId, createdAt])
+  @@index([entity, entityId])
+}
+
+model NotificationSetting {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type  NotificationPreferenceType
+  email Boolean                    @default(true)
+  inApp Boolean                    @default(true)
+  sms   Boolean                    @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, type])
+}
+
+enum DocumentRequestStatus {
+  PENDING
+  FULFILLED
+  WAIVED
+}
+
+model DocumentRequest {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  requestedById String?
+  requestedBy   User?   @relation("DocumentRequestsRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+
+  type   DocumentType
+  status DocumentRequestStatus @default(PENDING)
+
+  note    String?
+  dueDate DateTime?
+
+  fulfilledByDocumentId String?
+  fulfilledByDocument   Document? @relation("DocumentRequestFulfilledByDocument", fields: [fulfilledByDocumentId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shipmentId, type])
+  @@index([companyId, shipmentId, status])
+}
+
+/**
+ * -----------------------------
+ * PRICING SNAPSHOTS (KEEP)
+ * -----------------------------
+ */
+
+model QuotePricingSnapshot {
+  id          String   @id @default(cuid())
+  quoteId     String
+  version     Int
+  snapshot    Json
+  createdAt   DateTime @default(now())
+  createdById String?
+
+  quote     QuoteRequest @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  createdBy User?        @relation("QuotePricingSnapshotCreatedBy", fields: [createdById], references: [id])
+
+  @@unique([quoteId, version])
+  @@index([quoteId])
+}
+
+/**
+ * -----------------------------
+ * NEW TEMPLATE-BASED PRICING (ONLY)
+ * -----------------------------
+ */
+
+enum PricingDirection {
+  EXPORT
+  IMPORT
+}
+
+enum PricingTemplateCode {
+  AIR_EXPORT_LOCAL
+  AIR_EXPORT_FREEZONE
+  AIR_EXPORT_TRANSIT
+  AIR_IMPORT_LOCAL_CLEARANCE
+  AIR_IMPORT_REEXPORT
+  SEA_TO_AIR
+  AIR_EXPORT_TRANSFER_OWNERSHIP
+  AIR_IMPORT_TRANSFER_OWNERSHIP
+  SEA_EXPORT_TRANSFER_OWNERSHIP
+  SEA_IMPORT_TRANSFER_OWNERSHIP
+  SEA_EXPORT_LOCAL
+  SEA_EXPORT_FREEZONE
+  SEA_EXPORT_TRANSIT
+  SEA_EXPORT_LCL
+  SEA_IMPORT_LOCAL
+  SEA_IMPORT_LCL
+
+
+  SEA_EXPORT_LOCAL_20FT
+  SEA_EXPORT_LOCAL_40FT
+  SEA_EXPORT_FREEZONE_20FT
+  SEA_EXPORT_FREEZONE_40FT
+  // Add more later:
+  // SEA_EXPORT_...
+}
+
+enum ChargeGroup {
+  MAIN
+  EXWORKS
+  CLEARANCE
+  TRANSFER_OWNERSHIP
+  IMPORT_CLEARANCE
+  EXPORT_CLEARANCE
+}
+
+enum QtyBasis {
+  SHIPMENT
+  KG_ACTUAL
+  KG_CHARGEABLE_MAX
+  PIECE
+  CONTAINER
+  CUSTOM
+  CBM
+}
+
+enum SeaContainerType {
+  C20
+  C40
+}
+
+model PricingTemplate {
+  id        String                @id @default(cuid())
+  mode      ShipmentMode
+  direction PricingDirection
+  code      PricingTemplateCode   @unique
+  name      String
+  lines     PricingTemplateLine[]
+  createdAt DateTime              @default(now())
+}
+
+model PricingTemplateLine {
+  id         String      @id @default(cuid())
+  templateId String
+  code       String
+  label      String
+  group      ChargeGroup
+  qtyBasis   QtyBasis
+  order      Int
+
+  isDefault  Boolean @default(true)
+  isOptional Boolean @default(true)
+
+  isLabelling   Boolean @default(false)
+  isDiscount    Boolean @default(false) // Less Discounts
+  canBeNegative Boolean @default(false) // Round off
+
+  template PricingTemplate @relation(fields: [templateId], references: [id])
+
+  @@unique([templateId, code])
+}
+
+model QuotePricing {
+  id      String       @id @default(cuid())
+  quoteId String       @unique
+  quote   QuoteRequest @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  mode         ShipmentMode
+  direction    PricingDirection
+  templateCode PricingTemplateCode
+  currency     Currency            @default(AED)
+
+  charges QuotePricingCharge[]
+  blocks  QuotePricingBlock[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model QuotePricingBlock {
+  id        String       @id @default(cuid())
+  pricingId String
+  pricing   QuotePricing @relation(fields: [pricingId], references: [id], onDelete: Cascade)
+
+  containerType SeaContainerType
+  containerQty  Int // ops fills
+  isAddon       Boolean          @default(false)
+  order         Int              @default(0)
+
+  charges QuotePricingCharge[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pricingId])
+}
+
+model QuotePricingCharge {
+  id        String       @id @default(cuid())
+  pricingId String
+  pricing   QuotePricing @relation(fields: [pricingId], references: [id], onDelete: Cascade)
+
+  blockId String?
+  block   QuotePricingBlock? @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  code     String
+  label    String
+  group    ChargeGroup
+  qtyBasis QtyBasis
+  order    Int
+
+  // store as float for consistency with your QuoteRequest weightKg/pieces types
+  buyRate  Float @default(0)
+  sellRate Float @default(0)
+  qty      Float @default(1)
+
+  totalSell Float  @default(0)
+  margin    Float? // NULL for labelling
+
+  isLabelling   Boolean @default(false)
+  isDiscount    Boolean @default(false)
+  canBeNegative Boolean @default(false)
+
+  @@index([pricingId])
+  @@index([pricingId, code])
+  @@index([blockId])
+  @@index([blockId, code])
+}

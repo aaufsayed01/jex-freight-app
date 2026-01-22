@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgres:14
+    container_name: jex_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: jex_freight_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - jex_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jex_freight_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jex_api
+    depends_on:
+      db:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/jex_freight_db?schema=public
+      JWT_SECRET: your_super_secret_change_me
+      PORT: 3001
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_SECURE: "false"
+      EMAIL_ENABLED: "true"
+      MAIL_FROM: "admin@jex.com"
+      REPLY_TO_EMAIL: "admin@jex.com"
+      APP_PUBLIC_URL: "http://localhost:3001"
+      OPS_EMAIL: ""
+    command: sh -c "npx prisma migrate deploy --config=./prisma.config.ts && node dist/prisma/seed/seed.js && npm start"
+    restart: unless-stopped
+
+volumes:
+  jex_pgdata:
+
